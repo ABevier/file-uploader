@@ -58,8 +58,6 @@ func (p *program) processFiles(scanChannel, watchChannel <-chan string) {
 }
 
 func (p *program) lockAndProcessFile(path string) error {
-	log.Printf("Processing file: %v\n", path)
-
 	lock := fslock.New(path)
 	i := 0
 	for {
@@ -79,6 +77,7 @@ func (p *program) lockAndProcessFile(path string) error {
 }
 
 func (p *program) processFile(path string) error {
+	log.Printf("Processing file: %v\n", path)
 	file, err := os.Open(path)
 	if err != nil {
 		return err
