@@ -75,7 +75,7 @@ func (p *program) lockAndProcessFile(path string) error {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	defer lock.Unlock()
+	lock.Unlock()
 
 	log.Printf("successfully locked file")
 
