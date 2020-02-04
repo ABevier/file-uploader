@@ -2,4 +2,4 @@
 sourceDir: "/tmp/foo"
 completedDir: "/tmp/foo/completed"
 failedDir: "/tmp/foo/failed"
-uploadURL: "https://api.myfirm360.com/api/user-tokens/{SECRET}/upload"
+uploadURL: "https://api.myfirm360.com/api/user-tokens/{SECRET}/file-sync?firm=pdftest&recordType=DOCUMENT"

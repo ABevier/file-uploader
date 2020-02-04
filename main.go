@@ -14,6 +14,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/judwhite/go-svc/svc"
+	"github.com/juju/fslock"
 	"github.com/spf13/viper"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -41,14 +42,14 @@ func (p *program) processFiles(scanChannel, watchChannel <-chan string) {
 				if !ok {
 					return
 				}
-				if err := p.processFile(filename); err != nil {
+				if err := p.lockAndProcessFile(filename); err != nil {
 					log.Println(err)
 				}
 			case filename, ok := <-watchChannel:
 				if !ok {
 					return
 				}
-				if err := p.processFile(filename); err != nil {
+				if err := p.lockAndProcessFile(filename); err != nil {
 					log.Println(err)
 				}
 			}
@@ -56,9 +57,28 @@ func (p *program) processFiles(scanChannel, watchChannel <-chan string) {
 	}()
 }
 
-func (p *program) processFile(path string) error {
+func (p *program) lockAndProcessFile(path string) error {
 	log.Printf("Processing file: %v\n", path)
 
+	lock := fslock.New(path)
+	i := 0
+	for {
+		if err := lock.TryLock(); err != nil {
+			if i > 5 {
+				return err
+			}
+			i++
+		} else {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	lock.Unlock()
+
+	return p.processFile(path)
+}
+
+func (p *program) processFile(path string) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return err
@@ -195,11 +215,6 @@ func createURL() string {
 	if err != nil {
 		log.Panicf("Cannot create url! %v", err)
 	}
-
-	qp := url.Values{}
-	qp.Add("firm", "pdftest")
-	qp.Add("recordType", "DOCUMENT")
-	urlBase.RawQuery = qp.Encode()
 
 	return urlBase.String()
 }
