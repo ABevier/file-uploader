@@ -14,6 +14,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/judwhite/go-svc/svc"
+	"github.com/juju/fslock"
 	"github.com/spf13/viper"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -41,19 +42,44 @@ func (p *program) processFiles(scanChannel, watchChannel <-chan string) {
 				if !ok {
 					return
 				}
-				if err := p.processFile(filename); err != nil {
+				if err := p.lockAndProcessFile(filename); err != nil {
 					log.Println(err)
 				}
 			case filename, ok := <-watchChannel:
 				if !ok {
 					return
 				}
-				if err := p.processFile(filename); err != nil {
+				if err := p.lockAndProcessFile(filename); err != nil {
 					log.Println(err)
 				}
 			}
 		}
 	}()
+}
+
+func (p *program) lockAndProcessFile(path string) error {
+	lock := fslock.New(path)
+
+	log.Printf("trying to lock file")
+	i := 0
+	for {
+		if err := lock.TryLock(); err != nil {
+			if i > 5 {
+				log.Printf("gave up locking file")
+				return err
+			}
+			log.Printf("could not lock file")
+			i++
+		} else {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	defer lock.Unlock()
+
+	log.Printf("successfully locked file")
+
+	return p.processFile(path)
 }
 
 func (p *program) processFile(path string) error {
@@ -195,11 +221,6 @@ func createURL() string {
 	if err != nil {
 		log.Panicf("Cannot create url! %v", err)
 	}
-
-	qp := url.Values{}
-	qp.Add("firm", "pdftest")
-	qp.Add("recordType", "DOCUMENT")
-	urlBase.RawQuery = qp.Encode()
 
 	return urlBase.String()
 }
