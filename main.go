@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/judwhite/go-svc/svc"
 	"github.com/juju/fslock"
 	"github.com/spf13/viper"
@@ -30,34 +29,39 @@ type program struct {
 	uploadURL string
 }
 
-func (p *program) processFiles(scanChannel, watchChannel <-chan string) {
+func (p *program) processFiles(scanChannel <-chan string) {
 	p.done = make(chan bool)
 
 	go func() {
 		defer close(p.done)
 
 		for {
-			select {
-			case filename, ok := <-scanChannel:
-				if !ok {
-					return
-				}
-				if err := p.lockAndProcessFile(filename); err != nil {
-					log.Println(err)
-				}
-			case filename, ok := <-watchChannel:
-				if !ok {
-					return
-				}
-				if err := p.lockAndProcessFile(filename); err != nil {
-					log.Println(err)
-				}
+			filename, ok := <-scanChannel
+			if !ok {
+				return
+			}
+			if err := p.lockAndProcessFile(filename); err != nil {
+				log.Println(err)
 			}
 		}
 	}()
 }
 
 func (p *program) lockAndProcessFile(path string) error {
+	log.Printf("Attempting to lock file %s", path)
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	if fi.Size() <= 0 {
+		return nil
+	}
+
 	lock := fslock.New(path)
 	i := 0
 	for {
@@ -95,11 +99,12 @@ func (p *program) processFile(path string) error {
 			return
 		}
 
-		_, err = io.Copy(part, file)
+		size, err := io.Copy(part, file)
 		if err != nil {
 			log.Printf("Failed to copy file: %v", err)
 			return
 		}
+		log.Printf("Uploaded %v bytes for file %v", size, path)
 
 		if err = mpw.Close(); err != nil {
 			log.Printf("Failed to close Request: %v", err)
@@ -138,7 +143,7 @@ func (p *program) processFile(path string) error {
 func (p *program) timedScan() <-chan string {
 	fileChannel := make(chan string)
 
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	go func() {
 		defer close(fileChannel)
 
@@ -175,38 +180,6 @@ func (p *program) scanDirectory(channel chan<- string) error {
 		}
 	}
 	return nil
-}
-
-func (p *program) watchDirectory(watcher *fsnotify.Watcher) <-chan string {
-	watchedFileChannel := make(chan string)
-
-	go func() {
-		defer close(watchedFileChannel)
-
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					log.Println("Watcher channel closed unexpectedly!")
-					return
-				}
-				if event.Op&fsnotify.Create == fsnotify.Create {
-					watchedFileChannel <- event.Name
-				}
-			case err := <-watcher.Errors:
-				log.Printf("Watcher error: %v", err)
-			case <-p.shutdown:
-				return
-			}
-		}
-	}()
-
-	err := watcher.Add(p.sourceDir)
-	if err != nil {
-		log.Panicf("Couldn't add watcher on directory: %v", p.sourceDir)
-	}
-
-	return watchedFileChannel
 }
 
 func createURL() string {
@@ -258,18 +231,10 @@ func (p *program) run() {
 		log.Panicf("Couldn't create failed dir")
 	}
 
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Panic("Couldn't create a file watcher")
-	}
-	defer watcher.Close()
-
 	p.shutdown = make(chan bool)
-
-	watchChannel := p.watchDirectory(watcher)
 	scanChannel := p.timedScan()
 
-	p.processFiles(scanChannel, watchChannel)
+	p.processFiles(scanChannel)
 
 	<-p.shutdown
 	<-p.done
